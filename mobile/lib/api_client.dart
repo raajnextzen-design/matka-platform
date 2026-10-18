@@ -91,9 +91,10 @@ class ApiClient {
 
     late http.Response response;
     try {
-      response = await http.Response.fromStream(
-        _client.send(request),
-      ).timeout(const Duration(seconds: 20));
+      response = await _client
+    .send(request)
+    .then(http.Response.fromStream)
+    .timeout(const Duration(seconds: 20));
     } on SocketException catch (error) {
       throw ApiException(
         'You appear to be offline. Check your connection and try again.',
