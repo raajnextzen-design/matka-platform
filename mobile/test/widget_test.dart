@@ -234,7 +234,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ProfileScreen(auth: auth, api: api)));
     await tester.pumpAndSettle();
-    expect(find.text('member@example.com'), findsOneWidget);
+    expect(find.text('member@example.com'), findsNWidgets(2));
     expect(find.text('MEMBER SINCE'), findsOneWidget);
     await tester.tap(find.text('Sign out'));
     await tester.pumpAndSettle();
