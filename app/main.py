@@ -85,7 +85,32 @@ async def unexpected_error_handler(_: Request, __: Exception):
 
 @app.get("/health", tags=["health"])
 def health_check():
-    return {"status": "ok"}
+    from sqlalchemy import text
+    from app.db import DATABASE_URL, engine
+
+    database_type = (
+        "postgresql"
+        if DATABASE_URL.startswith("postgresql")
+        else "sqlite"
+        if DATABASE_URL.startswith("sqlite")
+        else "other"
+    )
+
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+
+        return {
+            "status": "ok",
+            "database_type": database_type,
+            "database_connection": "ok",
+        }
+    except Exception:
+        return {
+            "status": "error",
+            "database_type": database_type,
+            "database_connection": "failed",
+        }
 
 
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
