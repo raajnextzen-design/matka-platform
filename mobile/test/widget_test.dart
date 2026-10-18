@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -402,7 +403,7 @@ void main() {
   });
 
   testWidgets('offline market requests show a retryable offline state', (tester) async {
-    final api = ApiClient(baseUrl: 'https://mobile.test', client: MockClient((_) async => throw http.ClientException('offline')));
+    final api = ApiClient(baseUrl: 'https://mobile.test', client: MockClient((_) async => throw const SocketException('Network unavailable')));
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: MarketsScreen(api: api))));
     await tester.pumpAndSettle();
     expect(find.text('You’re offline'), findsOneWidget);
