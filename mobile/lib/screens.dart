@@ -882,9 +882,10 @@ class ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final apiError = error is ApiException ? error : null;
-    final offline = apiError?.isOffline == true;
-    final message = apiError?.message ?? 'Something went wrong. Please try again.';
+    final (offline, message) = switch (error) {
+      ApiException(:final isOffline, :final message) => (isOffline, message),
+      _ => (false, 'Something went wrong. Please try again.'),
+    };
     return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(offline ? Icons.wifi_off_rounded : Icons.error_outline, color: offline ? AppColors.gold : AppColors.red, size: 24), const SizedBox(height: 10), Text(offline ? 'You’re offline' : 'Couldn’t load this view', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)), const SizedBox(height: 6), Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, fontSize: 10, height: 1.5)), const SizedBox(height: 13), OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 16), label: const Text('Try again'))])));
   }
 }
