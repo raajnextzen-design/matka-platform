@@ -8,6 +8,9 @@ import 'models.dart';
 import 'token_store.dart';
 
 class AuthController extends ChangeNotifier {
+  static const _storageTimeout = Duration(seconds: 5);
+  static const _profileRestoreTimeout = Duration(seconds: 8);
+
   AuthController({required this.api, required this.tokenStore}) {
     api.onUnauthorized = () => unawaited(_expireSession());
   }
@@ -25,6 +28,14 @@ class AuthController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  Future<void> _deleteStoredToken() async {
+    try {
+      await tokenStore.delete().timeout(_storageTimeout);
+    } catch (_) {
+      // Local navigation must not wait indefinitely for secure storage.
+    }
+  }
+
   int? _tokenExpiry(String token) {
     try {
       final parts = token.split('.');
@@ -39,32 +50,40 @@ class AuthController extends ChangeNotifier {
 
   Future<void> restoreSession() async {
     isLoading = true;
+    sessionMessage = null;
     _notify();
     try {
-      final token = await tokenStore.read();
+      final token = await tokenStore.read().timeout(_storageTimeout);
       final expiry = token == null ? null : _tokenExpiry(token);
-      if (token == null || expiry == null || expiry <= DateTime.now().millisecondsSinceEpoch ~/ 1000) {
-        await tokenStore.delete();
+      if (token == null) {
         api.setAccessToken(null);
         user = null;
+      } else if (expiry == null || expiry <= DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+        api.setAccessToken(null);
+        user = null;
+        await _deleteStoredToken();
       } else {
         api.setAccessToken(token);
-        user = await api.getProfile();
+        user = await api.getProfile().timeout(_profileRestoreTimeout);
       }
+    } on TimeoutException {
+      api.setAccessToken(null);
+      user = null;
+      sessionMessage = 'Session check timed out. Check your connection or retry.';
     } on ApiException catch (error) {
       api.setAccessToken(null);
       user = null;
       if (error.isOffline) {
-        sessionMessage = 'You are offline. Your saved session is kept; reconnect to continue.';
+        sessionMessage = 'Could not verify your saved session. Check your connection or retry.';
       } else {
-        await tokenStore.delete();
+        await _deleteStoredToken();
         sessionMessage = 'Your session ended. Please sign in again.';
       }
     } catch (_) {
-      await tokenStore.delete();
+      await _deleteStoredToken();
       api.setAccessToken(null);
       user = null;
-      sessionMessage = 'Your session ended. Please sign in again.';
+      sessionMessage = 'Saved session could not be read. Please sign in or retry.';
     } finally {
       isLoading = false;
       _notify();
@@ -79,13 +98,13 @@ class AuthController extends ChangeNotifier {
     }
     api.setAccessToken(token);
     try {
-      await tokenStore.write(token);
+      await tokenStore.write(token).timeout(_storageTimeout);
       user = await api.getProfile();
       sessionMessage = null;
       _notify();
     } catch (_) {
       api.setAccessToken(null);
-      await tokenStore.delete();
+      await _deleteStoredToken();
       rethrow;
     }
   }
@@ -98,16 +117,17 @@ class AuthController extends ChangeNotifier {
   Future<void> signOut() async {
     api.setAccessToken(null);
     user = null;
-    await tokenStore.delete();
+    sessionMessage = null;
     _notify();
+    await _deleteStoredToken();
   }
 
   Future<void> _expireSession() async {
     api.setAccessToken(null);
     user = null;
     sessionMessage = 'Your session expired. Please sign in again.';
-    await tokenStore.delete();
     _notify();
+    await _deleteStoredToken();
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:matka_platform_mobile/api_client.dart';
+import 'package:matka_platform_mobile/app.dart';
 import 'package:matka_platform_mobile/auth_controller.dart';
 import 'package:matka_platform_mobile/models.dart';
 import 'package:matka_platform_mobile/screens.dart';
 import 'package:matka_platform_mobile/token_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class MemoryTokenStore implements TokenStore {
   MemoryTokenStore([this.token]);
@@ -23,6 +26,19 @@ class MemoryTokenStore implements TokenStore {
 
   @override
   Future<void> delete() async => token = null;
+}
+
+class StallingTokenStore implements TokenStore {
+  final _readCompleter = Completer<String?>();
+
+  @override
+  Future<String?> read() => _readCompleter.future;
+
+  @override
+  Future<void> write(String token) async {}
+
+  @override
+  Future<void> delete() async {}
 }
 
 String testToken() {
@@ -79,6 +95,50 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: SplashScreen()));
     expect(find.text('MATKA  /  PLATFORM'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('startup leaves splash and offers retry when secure storage stalls', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = ApiClient(baseUrl: 'https://mobile.test');
+    await tester.pumpWidget(MatkaApp(
+      apiClient: api,
+      tokenStore: StallingTokenStore(),
+      initialOnboardingComplete: true,
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump();
+
+    expect(find.text('Welcome back.'), findsOneWidget);
+    expect(find.text('Session check timed out. Check your connection or retry.'), findsOneWidget);
+    expect(find.text('Retry saved session'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('startup leaves splash when profile API verification stalls', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final pendingResponse = Completer<http.Response>();
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) => pendingResponse.future),
+    );
+    await tester.pumpWidget(MatkaApp(
+      apiClient: api,
+      tokenStore: MemoryTokenStore(testToken()),
+      initialOnboardingComplete: true,
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump();
+
+    expect(find.text('Welcome back.'), findsOneWidget);
+    expect(find.text('Session check timed out. Check your connection or retry.'), findsOneWidget);
+    expect(find.text('Retry saved session'), findsOneWidget);
+
+    pendingResponse.complete(jsonResponse(userJson()));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('onboarding steps lead into the informational app', (tester) async {

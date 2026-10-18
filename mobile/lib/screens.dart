@@ -229,6 +229,17 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
     }
   }
 
+  Future<void> _retrySavedSession() async {
+    setState(() { _pending = true; _error = null; });
+    try {
+      await widget.auth.restoreSession();
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Unable to restore your session. Please try again.');
+    } finally {
+      if (mounted) setState(() => _pending = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         body: SafeArea(
@@ -250,7 +261,17 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
                       Text(_registerMode ? 'Register to save markets and view your profile.' : 'Sign in to see your saved markets and profile.', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
                       const SizedBox(height: 28),
                       if (_error != null) ApiMessage(message: _error!, isError: true),
-                      if (_error == null && widget.sessionMessage != null) ApiMessage(message: widget.sessionMessage!, isError: true),
+                      if (_error == null && widget.sessionMessage != null) ...[
+                        ApiMessage(message: widget.sessionMessage!, isError: true),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: _pending ? null : _retrySavedSession,
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Retry saved session'),
+                          ),
+                        ),
+                      ],
                       Form(
                         key: _formKey,
                         child: Column(

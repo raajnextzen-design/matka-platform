@@ -24,6 +24,8 @@ class MatkaApp extends StatefulWidget {
 }
 
 class _MatkaAppState extends State<MatkaApp> {
+  static const _startupStorageTimeout = Duration(seconds: 5);
+
   late final ApiClient _api;
   late final AuthController _auth;
   bool _booting = true;
@@ -42,20 +44,28 @@ class _MatkaAppState extends State<MatkaApp> {
 
   Future<void> _bootstrap() async {
     try {
-      final preferences = await SharedPreferences.getInstance();
+      final preferences = await SharedPreferences.getInstance().timeout(_startupStorageTimeout);
       _onboardingComplete = widget.initialOnboardingComplete ??
           preferences.getBool('onboarding_complete') ??
           false;
-      await _auth.restoreSession();
     } catch (_) {
       _onboardingComplete = widget.initialOnboardingComplete ?? false;
     }
-    if (mounted) setState(() => _booting = false);
+
+    try {
+      await _auth.restoreSession();
+    } finally {
+      if (mounted) setState(() => _booting = false);
+    }
   }
 
   Future<void> _finishOnboarding() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool('onboarding_complete', true);
+    try {
+      final preferences = await SharedPreferences.getInstance().timeout(_startupStorageTimeout);
+      await preferences.setBool('onboarding_complete', true).timeout(_startupStorageTimeout);
+    } catch (_) {
+      // Continue for this app session even when onboarding persistence is unavailable.
+    }
     if (mounted) setState(() => _onboardingComplete = true);
   }
 
