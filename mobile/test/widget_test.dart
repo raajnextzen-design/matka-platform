@@ -91,6 +91,131 @@ http.Response jsonResponse(Object body, {int status = 200}) => http.Response(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('login request resolves to the configured API origin and exact route', () async {
+    Uri? requestUri;
+    final api = ApiClient(
+      baseUrl: 'https://matka-platform.onrender.com///',
+      client: MockClient((request) async {
+        requestUri = request.url;
+        return jsonResponse({'access_token': 'test-access-token'});
+      }),
+    );
+
+    await api.login('member@example.com', 'test-password');
+
+    expect(
+      requestUri,
+      Uri.parse('https://matka-platform.onrender.com/api/auth/login'),
+    );
+    api.close();
+  });
+
+  test('base URLs with a path are rejected instead of duplicating API routes', () async {
+    final api = ApiClient(
+      baseUrl: 'https://matka-platform.onrender.com/api',
+      client: MockClient((_) async => jsonResponse({'access_token': 'unused'})),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>().having(
+        (error) => error.code,
+        'code',
+        'API_NOT_CONFIGURED',
+      )),
+    );
+    api.close();
+  });
+
+  test('transport failure has a sanitized diagnostic and is not called offline', () async {
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) async => throw http.ClientException(
+        'Connection failed: https://user:secret@example.test/path?password=private',
+      )),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>()
+          .having((error) => error.code, 'code', 'TRANSPORT_ERROR')
+          .having((error) => error.isOffline, 'isOffline', isFalse)
+          .having(
+            (error) => error.diagnostic,
+            'diagnostic',
+            allOf(contains('<url>'), isNot(contains('secret')), isNot(contains('private'))),
+          )),
+    );
+    api.close();
+  });
+
+  test('timeout retains its category and configured duration', () async {
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) async => throw TimeoutException('request timed out')),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>()
+          .having((error) => error.code, 'code', 'NETWORK_TIMEOUT')
+          .having((error) => error.diagnostic, 'diagnostic', contains('20 seconds'))),
+    );
+    api.close();
+  });
+
+  test('HTTP errors retain status and API error code', () async {
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) async => jsonResponse({
+        'error': {'code': 'INVALID_CREDENTIALS', 'message': 'Invalid credentials'},
+      }, status: 401)),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>()
+          .having((error) => error.statusCode, 'statusCode', 401)
+          .having((error) => error.code, 'code', 'INVALID_CREDENTIALS')
+          .having((error) => error.diagnostic, 'diagnostic', 'HTTP 401 (INVALID_CREDENTIALS)')),
+    );
+    api.close();
+  });
+
+  test('non-JSON HTTP errors retain the HTTP status and parse failure', () async {
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) async => http.Response('upstream failure', 502)),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>()
+          .having((error) => error.statusCode, 'statusCode', 502)
+          .having((error) => error.code, 'code', 'HTTP_ERROR')
+          .having((error) => error.diagnostic, 'diagnostic', contains('HTTP 502'))
+          .having((error) => error.diagnostic, 'diagnostic', contains('JSON parse failed'))),
+    );
+    api.close();
+  });
+
+  test('invalid JSON reports parse diagnostics without including the response body', () async {
+    const responseBody = 'not-json-private-response';
+    final api = ApiClient(
+      baseUrl: 'https://mobile.test',
+      client: MockClient((_) async => http.Response(responseBody, 200)),
+    );
+
+    await expectLater(
+      api.login('member@example.com', 'test-password'),
+      throwsA(isA<ApiException>()
+          .having((error) => error.code, 'code', 'INVALID_RESPONSE')
+          .having((error) => error.diagnostic, 'diagnostic', contains('JSON parse failed'))
+          .having((error) => error.diagnostic, 'diagnostic', isNot(contains(responseBody)))),
+    );
+    api.close();
+  });
+
   testWidgets('splash shows the platform identity while bootstrapping', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: SplashScreen()));
     expect(find.text('MATKA  /  PLATFORM'), findsOneWidget);

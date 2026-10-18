@@ -14,12 +14,14 @@ class ApiException implements Exception {
     this.statusCode,
     this.code = 'API_ERROR',
     this.isOffline = false,
+    this.diagnostic,
   });
 
   final String message;
   final int? statusCode;
   final String code;
   final bool isOffline;
+  final String? diagnostic;
 
   @override
   String toString() => message;
@@ -27,7 +29,7 @@ class ApiException implements Exception {
 
 class ApiClient {
   ApiClient({String baseUrl = apiBaseUrl, http.Client? client})
-      : _baseUrl = baseUrl.trim().replaceFirst(RegExp(r'/$'), ''),
+      : _baseUrl = baseUrl.trim().replaceFirst(RegExp(r'/+$'), ''),
         _client = client ?? http.Client();
 
   final String _baseUrl;
@@ -39,10 +41,31 @@ class ApiClient {
     final uri = Uri.tryParse(_baseUrl);
     return uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty;
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        uri.path.isEmpty &&
+        uri.query.isEmpty &&
+        uri.fragment.isEmpty;
   }
 
   void setAccessToken(String? token) => _accessToken = token;
+
+  String _safeDiagnostic(String value) {
+    final sanitized = value
+        .replaceAll(RegExp(r'https?://\S+', caseSensitive: false), '<url>')
+        .replaceAll(RegExp(r'\bBearer\s+\S+', caseSensitive: false), 'Bearer <redacted>')
+        .replaceAll(
+          RegExp(r'\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b'),
+          '<redacted-token>',
+        )
+        .replaceAll(
+          RegExp(r'\b(password|token|authorization)=([^&\s]+)', caseSensitive: false),
+          r'$1=<redacted>',
+        )
+        .replaceAll(RegExp(r'[\r\n\t]'), ' ')
+        .trim();
+    return sanitized.length <= 160 ? sanitized : sanitized.substring(0, 160);
+  }
 
   Future<dynamic> _request(
     String path, {
@@ -56,7 +79,7 @@ class ApiClient {
         code: 'API_NOT_CONFIGURED',
       );
     }
-    final request = http.Request(method, Uri.parse('$_baseUrl$path'));
+    final request = http.Request(method, Uri.parse(_baseUrl).resolve(path));
     request.headers['Accept'] = 'application/json';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
@@ -69,55 +92,92 @@ class ApiClient {
     late http.Response response;
     try {
       response = await http.Response.fromStream(
-        await _client.send(request).timeout(const Duration(seconds: 20)),
-      );
-    } on SocketException {
-      throw const ApiException(
+        _client.send(request),
+      ).timeout(const Duration(seconds: 20));
+    } on SocketException catch (error) {
+      throw ApiException(
         'You appear to be offline. Check your connection and try again.',
         code: 'NETWORK_OFFLINE',
         isOffline: true,
+        diagnostic:
+            'SocketException (OS error code: ${error.osError?.errorCode ?? 'unknown'})',
       );
     } on TimeoutException {
       throw const ApiException(
         'The connection timed out. Check your network and retry.',
         code: 'NETWORK_TIMEOUT',
-        isOffline: true,
+        diagnostic: 'Request timed out after 20 seconds',
       );
-    } on http.ClientException {
+    } on http.ClientException catch (error) {
+      throw ApiException(
+        'The API connection failed. Check the server address and try again.',
+        code: 'TRANSPORT_ERROR',
+        diagnostic: _safeDiagnostic(error.message),
+      );
+    } on HandshakeException {
       throw const ApiException(
-        'The API could not be reached. Check your network and server.',
-        code: 'NETWORK_ERROR',
-        isOffline: true,
+        'A secure connection to the API could not be established.',
+        code: 'TLS_ERROR',
+        diagnostic: 'TLS handshake failed',
+      );
+    } on HttpException catch (error) {
+      throw ApiException(
+        'The API connection failed while receiving a response.',
+        code: 'TRANSPORT_ERROR',
+        diagnostic: _safeDiagnostic(error.message),
       );
     } on FormatException {
-      throw const ApiException('The API URL is invalid.', code: 'INVALID_API_URL');
+      throw const ApiException(
+        'The API URL is invalid.',
+        code: 'INVALID_API_URL',
+        diagnostic: 'Request URI could not be parsed',
+      );
     }
 
     if (response.statusCode == 401 && authenticated) {
       onUnauthorized?.call();
     }
-    if (response.statusCode == 204 || response.body.isEmpty) return null;
+    final isSuccess = response.statusCode >= 200 && response.statusCode < 300;
+    if (isSuccess && (response.statusCode == 204 || response.body.isEmpty)) {
+      return null;
+    }
 
     dynamic payload;
     try {
       payload = jsonDecode(response.body);
-    } on FormatException {
+    } on FormatException catch (error) {
+      final offset = error.offset == null ? 'unknown' : '${error.offset}';
+      final parseDiagnostic = 'JSON parse failed at character $offset';
+      if (!isSuccess) {
+        throw ApiException(
+          'Request failed (${response.statusCode}).',
+          statusCode: response.statusCode,
+          code: 'HTTP_ERROR',
+          diagnostic: 'HTTP ${response.statusCode}; $parseDiagnostic',
+        );
+      }
       throw ApiException(
         'The API returned an unreadable response (${response.statusCode}).',
         statusCode: response.statusCode,
         code: 'INVALID_RESPONSE',
+        diagnostic: parseDiagnostic,
       );
     }
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    if (!isSuccess) {
       final envelope = payload is Map<String, dynamic> ? payload['error'] : null;
-      final message = envelope is Map<String, dynamic>
-          ? envelope['message'] as String? ?? 'Request failed (${response.statusCode}).'
+      final message = envelope is Map<String, dynamic> && envelope['message'] is String
+          ? envelope['message'] as String
           : 'Request failed (${response.statusCode}).';
-      final code = envelope is Map<String, dynamic>
-          ? envelope['code'] as String? ?? 'HTTP_ERROR'
+      final code = envelope is Map<String, dynamic> && envelope['code'] is String
+          ? envelope['code'] as String
           : 'HTTP_ERROR';
-      throw ApiException(message, statusCode: response.statusCode, code: code);
+      throw ApiException(
+        message,
+        statusCode: response.statusCode,
+        code: code,
+        diagnostic: 'HTTP ${response.statusCode} ($code)',
+      );
     }
     return payload;
   }

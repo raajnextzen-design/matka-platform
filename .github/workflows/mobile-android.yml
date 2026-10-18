@@ -42,6 +42,33 @@ jobs:
           flutter create --platforms=android --project-name matka_platform_mobile --org com.matkaplatform /tmp/matka-platform-android
           cp -a /tmp/matka-platform-android/android ./android
 
+      - name: Ensure Android internet permission
+        working-directory: mobile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          contents = manifest.read_text()
+          permission = re.compile(
+              r'<uses-permission\b(?=[^>]*\bandroid:name=["\']android\.permission\.INTERNET["\'])[^>]*/?>'
+          )
+          if not permission.search(contents):
+              root = re.search(r'<manifest\b[^>]*>', contents)
+              if root is None:
+                  raise SystemExit("Could not find the Android manifest root element.")
+              contents = (
+                  contents[:root.end()]
+                  + '\n    <uses-permission android:name="android.permission.INTERNET" />'
+                  + contents[root.end():]
+              )
+              manifest.write_text(contents)
+          if not permission.search(manifest.read_text()):
+              raise SystemExit("Android internet permission was not added.")
+          print("Android INTERNET permission is present in the release manifest.")
+          PY
+
       - name: Analyze Dart source
         working-directory: mobile
         run: flutter analyze
@@ -54,10 +81,31 @@ jobs:
         env:
           API_BASE_URL: ${{ inputs.api_base_url }}
         run: |
-          if [[ ! "$API_BASE_URL" =~ ^https://[^/]+ ]]; then
-            echo "Release APK builds require an HTTPS API base URL."
-            exit 1
-          fi
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.environ["API_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          try:
+              valid_port = parsed.port is None or 1 <= parsed.port <= 65535
+          except ValueError:
+              valid_port = False
+          if (
+              parsed.scheme != "https"
+              or not parsed.hostname
+              or parsed.username is not None
+              or parsed.password is not None
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+              or not valid_port
+          ):
+              raise SystemExit(
+                  "Release APK builds require an HTTPS origin without credentials, paths, query, or fragment."
+              )
+          print(f"Validated HTTPS API origin: {parsed.scheme}://{parsed.netloc}")
+          PY
 
       - name: Build release APK
         working-directory: mobile

@@ -223,7 +223,16 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
       }
       _password.clear();
     } catch (error) {
-      if (mounted) setState(() => _error = error is ApiException ? error.message : 'Unable to sign in. Please try again.');
+      if (mounted) {
+        setState(() {
+          _error = error is ApiException
+              ? [
+                  error.message,
+                  if (error.diagnostic != null) 'Details: ${error.diagnostic}',
+                ].join('\n')
+              : 'Unable to sign in. Please try again.';
+        });
+      }
     } finally {
       if (mounted) setState(() => _pending = false);
     }

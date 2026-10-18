@@ -23,11 +23,11 @@ flutter test
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
 ```
 
-`API_BASE_URL` is a compile-time setting and has no production URL default. For a device, substitute a development API host that the device can reach. Do not use an emulator-only address in a release build. Commit the generated `pubspec.lock` after package resolution to keep future dependency versions reproducible.
+`API_BASE_URL` is a compile-time setting (`String.fromEnvironment`) and has no production URL default. Set it to an API origin only, such as `https://matka-platform.onrender.com`; do not append `/api` or another route. For a device, substitute a development API host that the device can reach. Do not use an emulator-only address in a release build. Commit the generated `pubspec.lock` after package resolution to keep future dependency versions reproducible.
 
 ## Zero-cost hosted APK build
 
-The repository root contains `.github/workflows/mobile-android.yml`. After pushing the project to GitHub, open **Actions → Mobile Android APK → Run workflow**, enter the HTTPS API base URL for that build, and start it. The hosted runner installs Flutter, generates the Android runner in a temporary directory, runs `flutter analyze` and all widget tests, builds a release APK with that URL, and uploads `app-release.apk` as a seven-day workflow artifact. No credentials, production signing keys, paid APIs, or local Flutter installation are required for this development APK; it is not configured for Play Store release signing.
+The repository root contains `.github/workflows/mobile-android.yml`. After pushing the project to GitHub, open **Actions → Mobile Android APK → Run workflow**, enter the HTTPS API origin for that build, and start it. The workflow validates that the input has no path or credentials, passes it to Dart as `--dart-define=API_BASE_URL=...`, and ensures the generated Android release manifest includes internet permission. The hosted runner installs Flutter, generates the Android runner in a temporary directory, runs `flutter analyze` and all widget tests, builds a release APK with that URL, and uploads `app-release.apk` as a seven-day workflow artifact. No credentials, production signing keys, paid APIs, or local Flutter installation are required for this development APK; it is not configured for Play Store release signing.
 
 GitHub Actions hosted-runner usage is free for public repositories; private repositories have plan-dependent free-minute quotas and may incur charges if those quotas are exceeded. Check the repository's current Actions usage/plan before dispatching. The workflow uses standard hosted Ubuntu/Java/Flutter tooling and does not call a paid build service.
 
@@ -36,7 +36,7 @@ GitHub Actions hosted-runner usage is free for public repositories; private repo
 - API paths and JSON fields match the existing backend routes and Pydantic schemas; see the API contract map below.
 - Set the environment-specific URL only with `--dart-define=API_BASE_URL=...`. For a hosted APK workflow, provide an HTTPS endpoint. The app does not embed any actual production URL.
 - Access tokens are stored with `flutter_secure_storage` and removed on logout, local expiry, or a backend 401. Passwords are not persisted.
-- Public market/result calls and authenticated profile/favourite calls show loading, empty, offline, and retryable error states.
+- Public market/result calls and authenticated profile/favourite calls show loading, empty, offline, and retryable error states. Login errors distinguish connectivity, timeout, TLS, HTTP, and malformed-JSON failures and show sanitized diagnostic details; credentials and response bodies are not included in those diagnostics.
 - Android secure storage reduces token exposure compared with ordinary preferences, but does not replace device security or HTTPS. Use a reviewed signing key and secure distribution process before public release.
 
 ## Existing backend API contract
