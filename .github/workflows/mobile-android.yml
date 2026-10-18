@@ -1,0 +1,74 @@
+name: Mobile Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: HTTPS API base URL for this build (for example, https://api.example.com)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-dependency-path: mobile/pubspec.yaml
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Generate Android platform scaffold
+        working-directory: mobile
+        run: |
+          flutter create --platforms=android --project-name matka_platform_mobile --org com.matkaplatform /tmp/matka-platform-android
+          cp -a /tmp/matka-platform-android/android ./android
+
+      - name: Analyze Dart source
+        working-directory: mobile
+        run: flutter analyze
+
+      - name: Run widget tests
+        working-directory: mobile
+        run: flutter test
+
+      - name: Validate release API URL
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+        run: |
+          if [[ ! "$API_BASE_URL" =~ ^https://[^/]+ ]]; then
+            echo "Release APK builds require an HTTPS API base URL."
+            exit 1
+          fi
+
+      - name: Build release APK
+        working-directory: mobile
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+        run: flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: matka-platform-android-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,33 @@
+# Local environment configuration; retain safe templates only.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python environments and caches.
+.venv/
+venv/
+env/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+site-packages/
+
+# JavaScript, Flutter, Android, and generated build output.
+node_modules/
+.dart_tool/
+.gradle/
+build/
+dist/
+coverage/
+
+# Local databases and signing credentials.
+*.py[cod]
+*.db
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+credentials.json
+service-account*.json
