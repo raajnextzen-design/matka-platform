@@ -466,7 +466,7 @@ class _MarketsScreenState extends State<MarketsScreen> {
 
   Future<_MarketData> _load() async {
     final responses = await Future.wait([widget.api.getMarkets(), widget.api.getFavourites()]);
-    return _MarketData(responses[0] as List<Market>, (responses[1] as List<Market>).map((m) => m.id).toSet());
+    return _MarketData(responses[0], responses[1].map((m) => m.id).toSet());
   }
 
   void _reload() => setState(() => _data = _load());
@@ -882,7 +882,7 @@ class ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final apiError = error is ApiException ? error as ApiException : null;
+    final apiError = error is ApiException ? error : null;
     final offline = apiError?.isOffline == true;
     final message = apiError?.message ?? 'Something went wrong. Please try again.';
     return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(offline ? Icons.wifi_off_rounded : Icons.error_outline, color: offline ? AppColors.gold : AppColors.red, size: 24), const SizedBox(height: 10), Text(offline ? 'You’re offline' : 'Couldn’t load this view', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)), const SizedBox(height: 6), Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, fontSize: 10, height: 1.5)), const SizedBox(height: 13), OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh, size: 16), label: const Text('Try again'))])));
